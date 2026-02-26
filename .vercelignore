@@ -1,0 +1,8 @@
+.git
+node_modules
+.env.local
+.env.*.local
+*.log
+.DS_Store
+PROGRESS.md
+HUBSPOT_SETUP.md
