@@ -743,7 +743,7 @@ export default function LandingPage() {
               <a href="mailto:support@figmints.com" className="hover:text-slate-900 transition-colors">Contact</a>
             </div>
             <div className="text-sm text-slate-500">
-              © 2024 Figmints. All rights reserved.
+              © {new Date().getFullYear()} Figmints. All rights reserved.
             </div>
           </div>
         </div>

@@ -182,6 +182,17 @@ export default function ResultsPage() {
     setFixingIssue(null);
   };
 
+  // Calculate estimated cost savings based on issues
+  const calculateCostSavings = () => {
+    if (!auditResult) return 0;
+    const issueCount = fixableIssues.length;
+    const potentialRevenueLost = (100 - auditResult.overallScore) * 150; // $150 per point lost
+    const timeWasted = issueCount * 2.5 * 50; // 2.5 hours per issue at $50/hour
+    return potentialRevenueLost + timeWasted;
+  };
+  
+  const estimatedSavings = calculateCostSavings();
+
   const getScoreColor = (score: number) => {
     if (score >= 80) return 'text-emerald-600';
     if (score >= 60) return 'text-yellow-600';
@@ -283,6 +294,19 @@ export default function ResultsPage() {
             {auditResult.overallScore >= 60 && auditResult.overallScore < 80 && '💪 Good foundation! Some improvements will get you to excellence.'}
             {auditResult.overallScore < 60 && '🎯 There\'s room for improvement. Let\'s get your HubSpot optimized!'}
           </p>
+          
+          {/* Cost Savings Banner */}
+          {estimatedSavings > 0 && (
+            <div className="mt-8 p-6 bg-gradient-to-r from-emerald-50 to-blue-50 rounded-xl border border-emerald-100 max-w-lg mx-auto">
+              <div className="text-sm text-slate-600 mb-1">Estimated annual value at risk</div>
+              <div className="text-4xl font-bold text-emerald-600">
+                ${estimatedSavings.toLocaleString()}
+              </div>
+              <p className="text-sm text-slate-500 mt-2">
+                Based on data quality issues and team efficiency loss
+              </p>
+            </div>
+          )}
         </section>
 
         {/* Category Breakdown */}
@@ -473,6 +497,24 @@ export default function ResultsPage() {
             className="px-6 py-3 bg-slate-100 text-slate-900 font-medium rounded-lg hover:bg-slate-200 transition-colors"
           >
             📋 Export Report
+          </button>
+          <button
+            onClick={() => {
+              const shareData = {
+                title: 'My HubSpot Health Score',
+                text: `I just got a ${auditResult?.overallScore}/100 health score for my HubSpot. Check yours for free!`,
+                url: 'https://hubspot-health.figmints.net'
+              };
+              if (navigator.share) {
+                navigator.share(shareData);
+              } else {
+                navigator.clipboard.writeText(`${shareData.text} ${shareData.url}`);
+                alert('Link copied to clipboard!');
+              }
+            }}
+            className="px-6 py-3 bg-slate-100 text-slate-900 font-medium rounded-lg hover:bg-slate-200 transition-colors"
+          >
+            📤 Share Results
           </button>
         </section>
       </main>
