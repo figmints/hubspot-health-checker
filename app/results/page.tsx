@@ -1,271 +1,476 @@
 'use client';
 
-import Header from '@/components/Header';
-import ScoreCircle from '@/components/ScoreCircle';
-import ProgressBar from '@/components/ProgressBar';
-import IssueCard from '@/components/IssueCard';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
-interface AuditResult {
+interface Category {
+  name: string;
   score: number;
-  categories: {
-    name: string;
-    score: number;
-    icon: string;
-  }[];
-  topIssues: {
-    title: string;
-    description: string;
-    severity: 'high' | 'medium' | 'low';
-    category: string;
-  }[];
-  recommendations: string[];
+  maxPoints: number;
+  description: string;
+  details: string[];
 }
 
-const MOCK_RESULT: AuditResult = {
-  score: 72,
-  categories: [
-    { name: 'Data Quality', score: 85, icon: '📊' },
-    { name: 'Integration Health', score: 72, icon: '🔗' },
-    { name: 'Automation Setup', score: 68, icon: '⚙️' },
-    { name: 'Security & Compliance', score: 75, icon: '🔒' },
-    { name: 'User Management', score: 64, icon: '👥' },
-  ],
-  topIssues: [
-    {
-      title: 'Incomplete contact data',
-      description: '42% of contacts missing email addresses',
-      severity: 'high',
-      category: 'Data Quality',
-    },
-    {
-      title: 'Inactive workflows',
-      description: '8 workflows are paused or inactive',
-      severity: 'medium',
-      category: 'Automation',
-    },
-    {
-      title: 'Missing field mappings',
-      description: 'Some custom fields are not synced with integrations',
-      severity: 'medium',
-      category: 'Integration',
-    },
-    {
-      title: 'User permission gaps',
-      description: '3 team members may have excessive permissions',
-      severity: 'low',
-      category: 'User Management',
-    },
-    {
-      title: 'Duplicate records',
-      description: 'Approximately 156 duplicate companies detected',
-      severity: 'high',
-      category: 'Data Quality',
-    },
-  ],
-  recommendations: [
-    'Set up automated email enrichment for contacts missing email addresses',
-    'Review and reactivate any paused workflows that are still relevant',
-    'Audit user permissions and apply principle of least privilege',
-    'Implement duplicate detection rules for contacts and companies',
-    'Create a data quality scorecard to track metrics over time',
-    'Consider implementing a data governance policy',
-  ],
-};
+interface AuditResult {
+  overallScore: number;
+  categories: Category[];
+  issues: string[];
+  recommendations: string[];
+  fixableIssues?: FixableIssue[];
+  fixableSummary?: {
+    total: number;
+    autoFixable: number;
+    highSeverity: number;
+  };
+}
+
+interface FixableIssue {
+  id: string;
+  type: string;
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  affectedCount: number;
+  affectedRecords: Array<{ id: string; name: string; details: Record<string, any> }>;
+  fixAction: string;
+  estimatedImpact: string;
+  canAutoFix: boolean;
+}
 
 export default function ResultsPage() {
   const router = useRouter();
   const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
-  const [email, setEmail] = useState('');
-  const [emailSubmitted, setEmailSubmitted] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [fixableIssues, setFixableIssues] = useState<FixableIssue[]>([]);
+  const [isLoadingFixes, setIsLoadingFixes] = useState(false);
+  const [fixingIssue, setFixingIssue] = useState<string | null>(null);
+  const [fixedIssues, setFixedIssues] = useState<Set<string>>(new Set());
+  const [isPremium, setIsPremium] = useState(false);
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    // Try to get results from sessionStorage, fallback to mock data
+    // Get audit results from sessionStorage
     const stored = sessionStorage.getItem('auditResults');
+    const storedToken = sessionStorage.getItem('hubspotToken');
+    
     if (stored) {
       try {
-        setAuditResult(JSON.parse(stored));
+        const data = JSON.parse(stored);
+        setAuditResult(data);
+        // Use fixable issues from audit result if available
+        if (data.fixableIssues) {
+          setFixableIssues(data.fixableIssues);
+        }
       } catch {
-        setAuditResult(MOCK_RESULT);
+        router.push('/');
+        return;
       }
-    } else {
-      setAuditResult(MOCK_RESULT);
     }
-  }, []);
+    
+    if (storedToken) {
+      setToken(storedToken);
+      // For demo, simulate premium status
+      setIsPremium(true);
+    }
+  }, [router]);
 
-  const handleEmailSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-
+  const fetchFixableIssues = async (accessToken: string) => {
+    setIsLoadingFixes(true);
     try {
-      // TODO: Connect to email service
-      // await fetch('/api/subscribe', { method: 'POST', body: JSON.stringify({ email }) });
-      setEmailSubmitted(true);
-      setTimeout(() => setIsSubmitting(false), 2000);
-    } catch {
-      setIsSubmitting(false);
+      const res = await fetch('/api/fix', {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setFixableIssues(data.issues || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch fixable issues:', error);
+    }
+    setIsLoadingFixes(false);
+  };
+
+  const handleFix = async (issueId: string) => {
+    if (!isPremium) {
+      setShowPremiumModal(true);
+      return;
+    }
+    
+    if (!token) return;
+    
+    setFixingIssue(issueId);
+    try {
+      const res = await fetch('/api/fix', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ issueId })
+      });
+      
+      if (res.ok) {
+        setFixedIssues(prev => new Set([...prev, issueId]));
+        // Re-fetch to get updated issues
+        await fetchFixableIssues(token);
+      } else {
+        alert('Fix failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('Fix failed:', error);
+      alert('Fix failed. Please try again.');
+    }
+    setFixingIssue(null);
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 80) return 'text-emerald-600';
+    if (score >= 60) return 'text-yellow-600';
+    return 'text-red-600';
+  };
+
+  const getScoreGradient = (score: number) => {
+    if (score >= 80) return 'from-emerald-500 to-emerald-600';
+    if (score >= 60) return 'from-yellow-500 to-orange-500';
+    return 'from-red-500 to-red-600';
+  };
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'high': return 'bg-red-100 text-red-700 border-red-200';
+      case 'medium': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+      case 'low': return 'bg-blue-100 text-blue-700 border-blue-200';
+      default: return 'bg-slate-100 text-slate-700 border-slate-200';
     }
   };
 
   if (!auditResult) {
     return (
-      <>
-        <Header />
-        <main className="flex-1 flex items-center justify-center px-4">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-            <p className="text-slate-600">Loading your results...</p>
-          </div>
-        </main>
-      </>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
+          <p className="text-slate-600">Loading your results...</p>
+        </div>
+      </div>
     );
   }
 
   return (
-    <>
-      <Header />
-      <main className="flex-1 flex flex-col px-4 sm:px-6 lg:px-8 py-12">
-        {/* Score Section */}
-        <section className="max-w-6xl mx-auto w-full mb-16">
-          <div className="text-center mb-8">
-            <h2 className="text-4xl font-bold text-slate-900 mb-2">Your HubSpot Health Score</h2>
-            <p className="text-slate-600">
-              Here's a comprehensive analysis of your HubSpot instance
-            </p>
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
+      {/* Header */}
+      <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-emerald-500 rounded-xl flex items-center justify-center">
+              <span className="text-white font-bold text-lg">HS</span>
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">HubSpot Health</h1>
+              <p className="text-xs text-slate-500 -mt-0.5">Audit Results</p>
+            </div>
+          </Link>
+          <div className="flex items-center gap-4">
+            {isPremium && (
+              <span className="px-3 py-1 bg-gradient-to-r from-blue-600 to-emerald-600 text-white text-sm font-medium rounded-full">
+                ✨ Premium
+              </span>
+            )}
+            <button
+              onClick={() => router.push('/')}
+              className="px-4 py-2 text-slate-600 hover:text-slate-900 transition-colors"
+            >
+              Run New Audit
+            </button>
           </div>
-          <ScoreCircle score={auditResult.score} size="large" />
-          <div className="mt-8 text-center">
-            <p className="text-slate-600 mb-4">
-              {auditResult.score >= 80 && '✨ Great job! Your HubSpot instance is in excellent shape.'}
-              {auditResult.score >= 60 && auditResult.score < 80 && '💪 Good foundation! With some improvements, you can reach excellence.'}
-              {auditResult.score < 60 && '🎯 There\'s room for improvement. Let\'s get your HubSpot optimized!'}
-            </p>
-          </div>
-        </section>
+        </div>
+      </nav>
 
-        {/* Categories Section */}
-        <section className="max-w-6xl mx-auto w-full mb-16">
-          <h3 className="text-2xl font-bold text-slate-900 mb-8">Category Breakdown</h3>
-          <div className="grid md:grid-cols-2 gap-8">
-            {auditResult.categories.map((category, idx) => (
-              <div key={idx} className="bg-white p-6 rounded-lg border border-slate-200 shadow-sm">
-                <ProgressBar
-                  label={category.name}
-                  score={category.score}
-                  icon={category.icon}
-                />
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Top Issues Section */}
-        <section className="max-w-6xl mx-auto w-full mb-16">
-          <h3 className="text-2xl font-bold text-slate-900 mb-8">Top Issues</h3>
-          <div className="space-y-4">
-            {auditResult.topIssues.map((issue, idx) => (
-              <IssueCard
-                key={idx}
-                title={issue.title}
-                description={issue.description}
-                severity={issue.severity}
-                category={issue.category}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        {/* Score Hero */}
+        <section className="text-center mb-16">
+          <h2 className="text-3xl font-bold text-slate-900 mb-8">Your HubSpot Health Score</h2>
+          
+          <div className="relative inline-block">
+            <svg className="w-48 h-48 transform -rotate-90">
+              <circle cx="96" cy="96" r="84" stroke="#e2e8f0" strokeWidth="12" fill="none" />
+              <circle 
+                cx="96" 
+                cy="96" 
+                r="84" 
+                stroke="url(#scoreGradient)" 
+                strokeWidth="12" 
+                fill="none"
+                strokeLinecap="round"
+                strokeDasharray={`${auditResult.overallScore * 5.28} 528`}
+                className="transition-all duration-1000"
               />
-            ))}
+              <defs>
+                <linearGradient id="scoreGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor={auditResult.overallScore >= 80 ? '#10b981' : auditResult.overallScore >= 60 ? '#f59e0b' : '#ef4444'} />
+                  <stop offset="100%" stopColor={auditResult.overallScore >= 80 ? '#059669' : auditResult.overallScore >= 60 ? '#ea580c' : '#dc2626'} />
+                </linearGradient>
+              </defs>
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className={`text-6xl font-bold ${getScoreColor(auditResult.overallScore)}`}>
+                {auditResult.overallScore}
+              </span>
+              <span className="text-slate-500 text-sm">out of 100</span>
+            </div>
           </div>
-        </section>
-
-        {/* Recommendations Section */}
-        <section className="max-w-6xl mx-auto w-full mb-16">
-          <h3 className="text-2xl font-bold text-slate-900 mb-8">Recommendations</h3>
-          <div className="bg-white rounded-lg border border-slate-200 p-8">
-            <ul className="space-y-4">
-              {auditResult.recommendations.map((rec, idx) => (
-                <li key={idx} className="flex gap-4">
-                  <span className="flex-shrink-0 w-6 h-6 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-700 font-bold text-sm">
-                    ✓
-                  </span>
-                  <span className="text-slate-700">{rec}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-
-        {/* CTA Section */}
-        <section className="max-w-6xl mx-auto w-full mb-16 bg-gradient-to-r from-blue-50 to-emerald-50 rounded-lg border border-blue-200 p-8">
-          <h3 className="text-2xl font-bold text-slate-900 mb-4">Want help fixing these issues?</h3>
-          <p className="text-slate-700 mb-6">
-            Our team of HubSpot experts can help you implement these recommendations and improve your health score.
+          
+          <p className="mt-6 text-lg text-slate-600 max-w-xl mx-auto">
+            {auditResult.overallScore >= 80 && '✨ Excellent! Your HubSpot is in great shape.'}
+            {auditResult.overallScore >= 60 && auditResult.overallScore < 80 && '💪 Good foundation! Some improvements will get you to excellence.'}
+            {auditResult.overallScore < 60 && '🎯 There\'s room for improvement. Let\'s get your HubSpot optimized!'}
           </p>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <button className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors">
-              Schedule a consultation
-            </button>
-            <button className="px-6 py-3 bg-white text-blue-600 font-semibold rounded-lg border border-blue-200 hover:bg-blue-50 transition-colors">
-              Get detailed report
-            </button>
+        </section>
+
+        {/* Category Breakdown */}
+        <section className="mb-16">
+          <h3 className="text-2xl font-bold text-slate-900 mb-8">Category Breakdown</h3>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {auditResult.categories.map((category, idx) => {
+              const percentage = Math.round((category.score / category.maxPoints) * 100);
+              return (
+                <div key={idx} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="font-semibold text-slate-900">{category.name}</h4>
+                    <span className={`text-2xl font-bold ${getScoreColor(percentage)}`}>
+                      {percentage}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-3 mb-4">
+                    <div 
+                      className={`h-3 rounded-full bg-gradient-to-r ${getScoreGradient(percentage)} transition-all duration-1000`}
+                      style={{ width: `${percentage}%` }}
+                    />
+                  </div>
+                  <p className="text-sm text-slate-600 mb-3">{category.description}</p>
+                  <ul className="text-xs text-slate-500 space-y-1">
+                    {category.details.slice(0, 3).map((detail, i) => (
+                      <li key={i}>• {detail}</li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
           </div>
         </section>
 
-        {/* Email Capture Section */}
-        <section className="max-w-md mx-auto w-full mb-16">
-          <h3 className="text-2xl font-bold text-slate-900 mb-4 text-center">
-            Get personalized insights
-          </h3>
-          <p className="text-slate-600 text-center mb-6">
-            Get tips delivered to your inbox to improve your health score
-          </p>
+        {/* Fixable Issues - Premium Feature */}
+        <section className="mb-16">
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h3 className="text-2xl font-bold text-slate-900">Fixable Issues</h3>
+              <p className="text-slate-600">Click to automatically fix these problems</p>
+            </div>
+            {!isPremium && (
+              <button 
+                onClick={() => setShowPremiumModal(true)}
+                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-emerald-600 text-white font-medium rounded-lg hover:shadow-lg transition-all"
+              >
+                ✨ Unlock Auto-Fix
+              </button>
+            )}
+          </div>
 
-          {emailSubmitted ? (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-6 text-center">
-              <div className="text-3xl mb-3">✨</div>
-              <h4 className="font-semibold text-emerald-900 mb-2">Thanks for subscribing!</h4>
-              <p className="text-emerald-800 text-sm">
-                Check your inbox for exclusive HubSpot optimization tips.
-              </p>
+          {isLoadingFixes ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+              <span className="ml-3 text-slate-600">Analyzing fixable issues...</span>
+            </div>
+          ) : fixableIssues.length === 0 ? (
+            <div className="text-center py-12 bg-emerald-50 rounded-xl border border-emerald-200">
+              <div className="text-4xl mb-4">🎉</div>
+              <h4 className="text-lg font-semibold text-emerald-900">No Fixable Issues Found!</h4>
+              <p className="text-emerald-700">Your HubSpot data is looking great.</p>
             </div>
           ) : (
-            <form onSubmit={handleEmailSubmit} className="space-y-3">
-              <input
-                type="email"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                {isSubmitting ? 'Subscribing...' : 'Subscribe for insights'}
-              </button>
-            </form>
+            <div className="space-y-4">
+              {fixableIssues.map((issue) => (
+                <div 
+                  key={issue.id} 
+                  className={`bg-white rounded-xl border p-6 transition-all ${
+                    fixedIssues.has(issue.id) ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full border ${getSeverityColor(issue.severity)}`}>
+                          {issue.severity.toUpperCase()}
+                        </span>
+                        <h4 className="font-semibold text-slate-900">{issue.title}</h4>
+                        {fixedIssues.has(issue.id) && (
+                          <span className="px-2 py-1 bg-emerald-100 text-emerald-700 text-xs font-medium rounded-full">
+                            ✓ Fixed
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-slate-600 mb-2">{issue.description}</p>
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className="text-slate-500">
+                          <strong className="text-slate-900">{issue.affectedCount}</strong> records affected
+                        </span>
+                        <span className="text-emerald-600">
+                          {issue.estimatedImpact}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3">
+                      {issue.canAutoFix ? (
+                        fixedIssues.has(issue.id) ? (
+                          <button className="px-6 py-3 bg-emerald-100 text-emerald-700 font-medium rounded-lg cursor-default">
+                            ✓ Fixed
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleFix(issue.id)}
+                            disabled={fixingIssue === issue.id}
+                            className={`px-6 py-3 font-medium rounded-lg transition-all ${
+                              isPremium 
+                                ? 'bg-gradient-to-r from-blue-600 to-emerald-600 text-white hover:shadow-lg disabled:opacity-50'
+                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            }`}
+                          >
+                            {fixingIssue === issue.id ? (
+                              <span className="flex items-center gap-2">
+                                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                </svg>
+                                Fixing...
+                              </span>
+                            ) : (
+                              <>
+                                {isPremium ? '🔧 Fix Now' : '🔒 ' + issue.fixAction}
+                              </>
+                            )}
+                          </button>
+                        )
+                      ) : (
+                        <span className="px-4 py-2 bg-slate-100 text-slate-500 rounded-lg text-sm">
+                          Manual fix required
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </section>
 
+        {/* Recommendations */}
+        {auditResult.recommendations.length > 0 && (
+          <section className="mb-16">
+            <h3 className="text-2xl font-bold text-slate-900 mb-8">Recommendations</h3>
+            <div className="bg-white rounded-xl border border-slate-200 p-8">
+              <ul className="space-y-4">
+                {auditResult.recommendations.map((rec, idx) => (
+                  <li key={idx} className="flex gap-4">
+                    <span className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-blue-500 to-emerald-500 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                      {idx + 1}
+                    </span>
+                    <span className="text-slate-700 pt-1">{rec}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+        )}
+
+        {/* CTA Section */}
+        {!isPremium && (
+          <section className="mb-16">
+            <div className="bg-gradient-to-r from-blue-600 to-emerald-600 rounded-2xl p-8 text-center text-white">
+              <h3 className="text-2xl font-bold mb-4">Ready to fix these issues automatically?</h3>
+              <p className="text-blue-100 mb-6 max-w-xl mx-auto">
+                Upgrade to Premium and let our AI fix your HubSpot problems with one click. 
+                Save hours of manual work and keep your data clean.
+              </p>
+              <button 
+                onClick={() => setShowPremiumModal(true)}
+                className="px-8 py-4 bg-white text-blue-600 font-semibold rounded-xl hover:bg-blue-50 transition-colors"
+              >
+                ✨ Start 14-Day Free Trial
+              </button>
+            </div>
+          </section>
+        )}
+
         {/* Footer Actions */}
-        <section className="max-w-6xl mx-auto w-full py-8 border-t border-slate-200">
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <a
-              href="/"
-              className="px-6 py-3 text-blue-600 font-semibold hover:bg-blue-50 rounded-lg transition-colors text-center"
-            >
-              ← Back home
-            </a>
-            <button
-              onClick={() => router.push('/audit')}
-              className="px-6 py-3 bg-slate-200 text-slate-900 font-semibold rounded-lg hover:bg-slate-300 transition-colors"
-            >
-              Run another audit
-            </button>
-          </div>
+        <section className="py-8 border-t border-slate-200 flex flex-col sm:flex-row gap-4 justify-center">
+          <Link
+            href="/"
+            className="px-6 py-3 text-slate-600 font-medium hover:text-slate-900 transition-colors text-center"
+          >
+            ← Back home
+          </Link>
+          <button
+            onClick={() => window.print()}
+            className="px-6 py-3 bg-slate-100 text-slate-900 font-medium rounded-lg hover:bg-slate-200 transition-colors"
+          >
+            📋 Export Report
+          </button>
         </section>
       </main>
-    </>
+
+      {/* Premium Modal */}
+      {showPremiumModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-8 relative">
+            <button 
+              onClick={() => setShowPremiumModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            
+            <div className="text-center">
+              <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <span className="text-3xl">✨</span>
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900 mb-4">Unlock Premium Features</h3>
+              <p className="text-slate-600 mb-8">
+                Auto-fix issues, track your score over time, and get proactive alerts when new problems appear.
+              </p>
+              
+              <ul className="text-left space-y-3 mb-8">
+                {[
+                  '🔧 Automated issue fixing',
+                  '📈 Historical score tracking',
+                  '🔔 Daily monitoring & alerts',
+                  '📋 PDF health reports',
+                  '💬 Priority support',
+                ].map((feature, idx) => (
+                  <li key={idx} className="flex items-center gap-3 text-slate-700">
+                    <svg className="w-5 h-5 text-emerald-500" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                    {feature}
+                  </li>
+                ))}
+              </ul>
+              
+              <div className="mb-6">
+                <span className="text-4xl font-bold text-slate-900">$99</span>
+                <span className="text-slate-500">/month</span>
+              </div>
+              
+              <button className="w-full py-4 bg-gradient-to-r from-blue-600 to-emerald-600 text-white font-semibold rounded-xl hover:shadow-lg transition-all mb-3">
+                Start 14-Day Free Trial
+              </button>
+              <p className="text-sm text-slate-500">No credit card required</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
