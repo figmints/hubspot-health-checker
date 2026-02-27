@@ -295,6 +295,27 @@ export default function ResultsPage() {
             {auditResult.overallScore < 60 && '🎯 There\'s room for improvement. Let\'s get your HubSpot optimized!'}
           </p>
           
+          {/* Industry Benchmark */}
+          <div className="mt-6 flex items-center justify-center gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-slate-300" />
+              <span className="text-slate-500">Average: 58</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-emerald-500" />
+              <span className="text-slate-500">Top 10%: 85+</span>
+            </div>
+            <div className={`px-2 py-1 rounded text-xs font-medium ${
+              auditResult.overallScore >= 85 ? 'bg-emerald-100 text-emerald-700' :
+              auditResult.overallScore >= 58 ? 'bg-blue-100 text-blue-700' :
+              'bg-amber-100 text-amber-700'
+            }`}>
+              {auditResult.overallScore >= 85 ? '🏆 Top 10%' :
+               auditResult.overallScore >= 58 ? '📊 Above Average' :
+               '📈 Room to Grow'}
+            </div>
+          </div>
+          
           {/* Cost Savings Banner */}
           {estimatedSavings > 0 && (
             <div className="mt-8 p-6 bg-gradient-to-r from-emerald-50 to-blue-50 rounded-xl border border-emerald-100 max-w-lg mx-auto">

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import SetupGuide from '@/components/SetupGuide';
 
 // Animated counter component
 function AnimatedCounter({ end, duration = 2000, prefix = '', suffix = '' }: { end: number; duration?: number; prefix?: string; suffix?: string }) {
@@ -212,9 +213,14 @@ export default function LandingPage() {
                   </>
                 )}
               </button>
-              <span className="text-slate-500 text-sm">
-                ⚡ Results in 60 seconds • No credit card required
-              </span>
+              <div className="text-center">
+                <span className="text-slate-500 text-sm">
+                  ⚡ Results in 60 seconds • No credit card required
+                </span>
+                <div className="mt-2">
+                  <SetupGuide />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -673,7 +679,7 @@ export default function LandingPage() {
               },
               {
                 q: "What's a HubSpot Private App Access Token?",
-                a: "It's a secure way to connect third-party tools to your HubSpot. You can create one in HubSpot Settings → Integrations → Private Apps. We only need read access for the free audit, and read/write for the Premium auto-fix features."
+                a: "It's a secure way to connect third-party tools to your HubSpot. You can create one in HubSpot Settings → Integrations → Private Apps. We only need read access for the free audit, and read/write for the Premium auto-fix features. It takes about 2 minutes to set up."
               },
               {
                 q: "Is my data secure?",
