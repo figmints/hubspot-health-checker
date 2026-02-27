@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import ThemeToggle from '@/components/ThemeToggle';
 
 interface HealthScore {
   score: number;
@@ -211,6 +212,7 @@ export default function DashboardPage() {
             >
               View Full Report
             </Link>
+            <ThemeToggle />
           </div>
         </div>
       </nav>
