@@ -1,9 +1,12 @@
 # HubSpot Health Checker
 
-A free web app that analyzes HubSpot CRM instances and provides a health score with actionable recommendations.
+A free web app that analyzes HubSpot CRM instances and provides a health score with actionable recommendations. Premium tier offers automated issue fixing.
+
+**Live:** https://hubspot-health.figmints.net
 
 ## Features
 
+### Free Tier
 - 🔐 Secure OAuth 2.0 integration with HubSpot
 - 📊 Comprehensive CRM health scoring (0-100)
 - 📈 5-category breakdown:
@@ -16,6 +19,18 @@ A free web app that analyzes HubSpot CRM instances and provides a health score w
 - 📧 Lead capture form
 - 📱 Mobile responsive design
 - ⚡ Fast results (< 30 seconds)
+
+### Premium Tier ($99/mo)
+- 🔧 **Automated Issue Fixing** - One-click remediation for:
+  - Duplicate contacts/companies (merge)
+  - Inconsistent name formatting
+  - Phone number standardization
+  - Orphan contact archiving
+  - Stale deal archiving
+- 📈 **Historical Score Tracking** - See trends over time
+- 🔔 **Proactive Monitoring** - Daily scans with alerts
+- 📋 **PDF Health Reports** - Export for clients/leadership
+- 💬 **Priority Support**
 
 ## Tech Stack
 
@@ -47,14 +62,38 @@ npm install
 
 ### 3. Configure Environment
 
-Copy `.env.example` to `.env.local` and fill in your HubSpot credentials:
+Copy `.env.example` to `.env.local` and fill in your credentials:
 
 ```bash
+# HubSpot OAuth
 HUBSPOT_CLIENT_ID=your_client_id
 HUBSPOT_CLIENT_SECRET=your_client_secret
 HUBSPOT_REDIRECT_URI=http://localhost:3000/api/auth/callback
 SESSION_SECRET=any-random-secret-key
+
+# Stripe (for Premium tier)
+STRIPE_SECRET_KEY=sk_test_xxx
+STRIPE_PUBLISHABLE_KEY=pk_test_xxx
+STRIPE_WEBHOOK_SECRET=whsec_xxx
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
 ```
+
+### 4. Set Up Stripe (for Premium features)
+
+1. Go to [Stripe Dashboard](https://dashboard.stripe.com)
+2. Get your API keys (use test keys for development)
+3. Create a webhook endpoint pointing to `/api/webhook`:
+   - Events to listen for:
+     - `checkout.session.completed`
+     - `customer.subscription.created`
+     - `customer.subscription.updated`
+     - `customer.subscription.deleted`
+     - `invoice.payment_succeeded`
+     - `invoice.payment_failed`
+     - `customer.subscription.trial_will_end`
+4. Copy the webhook signing secret to `STRIPE_WEBHOOK_SECRET`
+
+The app will automatically create the Premium product/price on first checkout.
 
 ### 4. Run Locally
 
@@ -179,6 +218,35 @@ Response:
 
 ### GET/POST /api/audit/results
 Get or save audit results in session.
+
+### GET /api/fix
+Returns list of fixable issues detected in HubSpot data.
+
+### POST /api/fix
+Executes a fix for a specific issue (Premium only).
+
+Parameters:
+```json
+{
+  "issueId": "duplicate_contacts",
+  "portalId": "your-portal-id"
+}
+```
+
+### POST /api/checkout
+Creates a Stripe checkout session for Premium subscription.
+
+Parameters:
+```json
+{
+  "email": "user@example.com",
+  "portalId": "your-portal-id",
+  "action": "checkout" // or "manage" for billing portal
+}
+```
+
+### POST /api/webhook
+Handles Stripe webhook events (subscription lifecycle).
 
 ## Contributing
 
