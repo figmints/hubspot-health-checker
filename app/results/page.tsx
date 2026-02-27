@@ -48,11 +48,15 @@ export default function ResultsPage() {
   const [isPremium, setIsPremium] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [token, setToken] = useState<string | null>(null);
+  const [portalId, setPortalId] = useState<string | null>(null);
+  const [isUpgrading, setIsUpgrading] = useState(false);
+  const [upgradeEmail, setUpgradeEmail] = useState('');
 
   useEffect(() => {
     // Get audit results from sessionStorage
     const stored = sessionStorage.getItem('auditResults');
     const storedToken = sessionStorage.getItem('hubspotToken');
+    const storedPortalId = sessionStorage.getItem('portalId') || 'demo-portal';
     
     if (stored) {
       try {
@@ -70,10 +74,60 @@ export default function ResultsPage() {
     
     if (storedToken) {
       setToken(storedToken);
-      // For demo, simulate premium status
-      setIsPremium(true);
+      setPortalId(storedPortalId);
+      
+      // Check actual premium status
+      checkPremiumStatus(storedPortalId);
     }
   }, [router]);
+
+  const checkPremiumStatus = async (pId: string) => {
+    try {
+      const res = await fetch(`/api/checkout?portalId=${pId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setIsPremium(data.isPremium);
+      }
+    } catch (error) {
+      console.error('Failed to check premium status:', error);
+    }
+  };
+
+  const handleUpgrade = async () => {
+    if (!upgradeEmail || !portalId) {
+      alert('Please enter your email');
+      return;
+    }
+    
+    setIsUpgrading(true);
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: upgradeEmail,
+          portalId: portalId,
+        }),
+      });
+      
+      const data = await res.json();
+      
+      if (data.alreadyPremium) {
+        setIsPremium(true);
+        setShowPremiumModal(false);
+        alert('You already have a premium subscription!');
+      } else if (data.url) {
+        // Redirect to Stripe Checkout
+        window.location.href = data.url;
+      } else {
+        alert('Failed to start checkout: ' + (data.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Checkout error:', error);
+      alert('Failed to start checkout. Please try again.');
+    }
+    setIsUpgrading(false);
+  };
 
   const fetchFixableIssues = async (accessToken: string) => {
     setIsLoadingFixes(true);
@@ -107,15 +161,19 @@ export default function ResultsPage() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ issueId })
+        body: JSON.stringify({ issueId, portalId })
       });
+      
+      const data = await res.json();
       
       if (res.ok) {
         setFixedIssues(prev => new Set([...prev, issueId]));
         // Re-fetch to get updated issues
         await fetchFixableIssues(token);
+      } else if (data.requiresPremium) {
+        setShowPremiumModal(true);
       } else {
-        alert('Fix failed. Please try again.');
+        alert('Fix failed: ' + (data.message || 'Please try again.'));
       }
     } catch (error) {
       console.error('Fix failed:', error);
@@ -437,11 +495,11 @@ export default function ResultsPage() {
                 <span className="text-3xl">✨</span>
               </div>
               <h3 className="text-2xl font-bold text-slate-900 mb-4">Unlock Premium Features</h3>
-              <p className="text-slate-600 mb-8">
+              <p className="text-slate-600 mb-6">
                 Auto-fix issues, track your score over time, and get proactive alerts when new problems appear.
               </p>
               
-              <ul className="text-left space-y-3 mb-8">
+              <ul className="text-left space-y-3 mb-6">
                 {[
                   '🔧 Automated issue fixing',
                   '📈 Historical score tracking',
@@ -461,12 +519,38 @@ export default function ResultsPage() {
               <div className="mb-6">
                 <span className="text-4xl font-bold text-slate-900">$99</span>
                 <span className="text-slate-500">/month</span>
+                <p className="text-sm text-emerald-600 mt-1">Starts with 14-day free trial</p>
               </div>
               
-              <button className="w-full py-4 bg-gradient-to-r from-blue-600 to-emerald-600 text-white font-semibold rounded-xl hover:shadow-lg transition-all mb-3">
-                Start 14-Day Free Trial
+              {/* Email input */}
+              <div className="mb-4">
+                <input
+                  type="email"
+                  value={upgradeEmail}
+                  onChange={(e) => setUpgradeEmail(e.target.value)}
+                  placeholder="Enter your email"
+                  className="w-full px-4 py-3 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              
+              <button 
+                onClick={handleUpgrade}
+                disabled={isUpgrading || !upgradeEmail}
+                className="w-full py-4 bg-gradient-to-r from-blue-600 to-emerald-600 text-white font-semibold rounded-xl hover:shadow-lg transition-all mb-3 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isUpgrading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Processing...
+                  </>
+                ) : (
+                  'Start 14-Day Free Trial →'
+                )}
               </button>
-              <p className="text-sm text-slate-500">No credit card required</p>
+              <p className="text-sm text-slate-500">Secure payment via Stripe • Cancel anytime</p>
             </div>
           </div>
         </div>

@@ -14,7 +14,7 @@ import {
   standardizeEmail 
 } from "@/lib/hubspot";
 import { detectAllFixableIssues, FixableIssue } from "@/lib/fixable-issues";
-import { getOrCreateWorkspace, recordFix } from "@/lib/db";
+import { getOrCreateWorkspace, recordFix, isPremiumByPortalId } from "@/lib/db";
 
 interface FixResult {
   success: boolean;
@@ -73,6 +73,7 @@ export async function GET(request: Request) {
 /**
  * POST /api/fix
  * Executes a fix for a specific issue
+ * Requires Premium subscription
  */
 export async function POST(request: Request) {
   try {
@@ -83,7 +84,21 @@ export async function POST(request: Request) {
     
     const accessToken = authHeader.substring(7);
     const body = await request.json();
-    const { issueId, dryRun = false } = body;
+    const { issueId, dryRun = false, portalId } = body;
+    
+    // Check premium status
+    const isPremium = portalId ? isPremiumByPortalId(portalId) : false;
+    if (!isPremium && !dryRun) {
+      return NextResponse.json(
+        { 
+          error: "Premium Required", 
+          message: "Automated fixes require a Premium subscription. Upgrade to unlock this feature.",
+          requiresPremium: true,
+          upgradeUrl: "/api/checkout"
+        }, 
+        { status: 403 }
+      );
+    }
     
     if (!issueId) {
       return NextResponse.json(

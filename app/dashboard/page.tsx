@@ -63,10 +63,21 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isPremium, setIsPremium] = useState(false);
+  const [subscription, setSubscription] = useState<any>(null);
+  const [showUpgradeSuccess, setShowUpgradeSuccess] = useState(false);
 
   useEffect(() => {
     // Get portal ID from session storage or URL
     const portalId = sessionStorage.getItem('portalId') || 'demo-portal';
+    
+    // Check for upgrade success
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('upgraded') === 'true') {
+      setShowUpgradeSuccess(true);
+      // Clean URL
+      window.history.replaceState({}, '', '/dashboard');
+    }
     
     const fetchDashboard = async () => {
       try {
@@ -77,6 +88,14 @@ export default function DashboardPage() {
         } else {
           setError('Failed to load dashboard data');
         }
+        
+        // Check premium status
+        const statusRes = await fetch(`/api/checkout?portalId=${portalId}`);
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          setIsPremium(statusData.isPremium);
+          setSubscription(statusData.subscription);
+        }
       } catch (err) {
         setError('Failed to connect to server');
       }
@@ -85,6 +104,34 @@ export default function DashboardPage() {
 
     fetchDashboard();
   }, []);
+
+  const handleManageSubscription = async () => {
+    try {
+      const portalId = sessionStorage.getItem('portalId') || 'demo-portal';
+      const email = prompt('Enter your email to manage subscription:');
+      if (!email) return;
+      
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          portalId,
+          action: 'manage',
+        }),
+      });
+      
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert(data.error || 'Failed to open subscription management');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Failed to manage subscription');
+    }
+  };
 
   if (isLoading) {
     return (
@@ -115,6 +162,19 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
+      {/* Upgrade Success Banner */}
+      {showUpgradeSuccess && (
+        <div className="bg-emerald-500 text-white py-3 px-4 text-center">
+          <span className="font-medium">🎉 Welcome to Premium! Your account has been upgraded successfully.</span>
+          <button 
+            onClick={() => setShowUpgradeSuccess(false)}
+            className="ml-4 text-emerald-100 hover:text-white"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      
       {/* Header */}
       <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
@@ -128,9 +188,23 @@ export default function DashboardPage() {
             </div>
           </Link>
           <div className="flex items-center gap-4">
-            <span className="px-3 py-1 bg-gradient-to-r from-blue-600 to-emerald-600 text-white text-sm font-medium rounded-full">
-              ✨ Premium
-            </span>
+            {isPremium ? (
+              <>
+                <span className="px-3 py-1 bg-gradient-to-r from-blue-600 to-emerald-600 text-white text-sm font-medium rounded-full">
+                  ✨ Premium
+                </span>
+                <button
+                  onClick={handleManageSubscription}
+                  className="px-4 py-2 text-slate-600 hover:text-slate-900 transition-colors text-sm"
+                >
+                  Manage Subscription
+                </button>
+              </>
+            ) : (
+              <span className="px-3 py-1 bg-slate-200 text-slate-700 text-sm font-medium rounded-full">
+                Free Plan
+              </span>
+            )}
             <Link
               href="/results"
               className="px-4 py-2 text-slate-600 hover:text-slate-900 transition-colors"
@@ -304,6 +378,30 @@ export default function DashboardPage() {
           </section>
         </div>
 
+        {/* Subscription Info (if premium) */}
+        {isPremium && subscription && (
+          <section className="mt-12 bg-gradient-to-r from-blue-50 to-emerald-50 rounded-xl border border-blue-100 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-slate-900 mb-1">Premium Subscription</h3>
+                <p className="text-sm text-slate-600">
+                  {subscription.cancelAtPeriodEnd ? (
+                    <span className="text-orange-600">Cancels at period end</span>
+                  ) : (
+                    <>Next billing: {new Date(subscription.currentPeriodEnd).toLocaleDateString()}</>
+                  )}
+                </p>
+              </div>
+              <button
+                onClick={handleManageSubscription}
+                className="px-4 py-2 bg-white text-slate-700 font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors text-sm"
+              >
+                Manage Billing
+              </button>
+            </div>
+          </section>
+        )}
+
         {/* Quick Actions */}
         <section className="mt-12 flex flex-wrap gap-4 justify-center">
           <Link
@@ -318,6 +416,14 @@ export default function DashboardPage() {
           <button className="px-6 py-3 bg-white text-slate-700 font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
             ⚙️ Configure Monitoring
           </button>
+          {isPremium && (
+            <button
+              onClick={handleManageSubscription}
+              className="px-6 py-3 bg-white text-slate-700 font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+            >
+              💳 Manage Subscription
+            </button>
+          )}
         </section>
       </main>
     </div>

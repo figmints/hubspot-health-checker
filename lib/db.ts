@@ -81,11 +81,28 @@ function getDb(): Database.Database {
       FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
     );
 
+    -- Stripe subscriptions table
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      workspace_id INTEGER NOT NULL,
+      stripe_customer_id TEXT NOT NULL,
+      stripe_subscription_id TEXT UNIQUE,
+      status TEXT DEFAULT 'inactive' CHECK (status IN ('active', 'inactive', 'past_due', 'canceled', 'trialing')),
+      plan TEXT DEFAULT 'premium',
+      current_period_end DATETIME,
+      cancel_at_period_end INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+    );
+
     -- Create indexes for common queries
     CREATE INDEX IF NOT EXISTS idx_health_scores_workspace ON health_scores(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_health_scores_date ON health_scores(created_at);
     CREATE INDEX IF NOT EXISTS idx_fix_logs_workspace ON fix_logs(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_alerts_workspace ON alerts(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_subscriptions_workspace ON subscriptions(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_customer ON subscriptions(stripe_customer_id);
   `);
   
   return _db;
@@ -339,6 +356,160 @@ export function markAlertRead(alertId: number): void {
 export function markAllAlertsRead(workspaceId: number): void {
   const db = getDb();
   db.prepare('UPDATE alerts SET is_read = 1 WHERE workspace_id = ?').run(workspaceId);
+}
+
+// ============================================================
+// SUBSCRIPTION FUNCTIONS
+// ============================================================
+
+export interface Subscription {
+  id: number;
+  workspace_id: number;
+  stripe_customer_id: string;
+  stripe_subscription_id: string | null;
+  status: 'active' | 'inactive' | 'past_due' | 'canceled' | 'trialing';
+  plan: string;
+  current_period_end: string | null;
+  cancel_at_period_end: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export function getOrCreateSubscription(
+  workspaceId: number,
+  stripeCustomerId: string
+): Subscription {
+  const db = getDb();
+  const existing = db.prepare(
+    'SELECT * FROM subscriptions WHERE workspace_id = ?'
+  ).get(workspaceId) as Subscription | undefined;
+  
+  if (existing) {
+    // Update customer ID if changed
+    if (existing.stripe_customer_id !== stripeCustomerId) {
+      db.prepare(
+        'UPDATE subscriptions SET stripe_customer_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+      ).run(stripeCustomerId, existing.id);
+    }
+    return existing;
+  }
+  
+  const result = db.prepare(
+    'INSERT INTO subscriptions (workspace_id, stripe_customer_id) VALUES (?, ?)'
+  ).run(workspaceId, stripeCustomerId);
+  
+  return db.prepare('SELECT * FROM subscriptions WHERE id = ?').get(result.lastInsertRowid) as Subscription;
+}
+
+export function updateSubscriptionStatus(
+  stripeSubscriptionId: string,
+  status: Subscription['status'],
+  currentPeriodEnd?: Date,
+  cancelAtPeriodEnd?: boolean
+): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE subscriptions 
+    SET status = ?, 
+        current_period_end = ?, 
+        cancel_at_period_end = ?,
+        updated_at = CURRENT_TIMESTAMP 
+    WHERE stripe_subscription_id = ?
+  `).run(
+    status,
+    currentPeriodEnd?.toISOString() || null,
+    cancelAtPeriodEnd ? 1 : 0,
+    stripeSubscriptionId
+  );
+}
+
+export function setStripeSubscriptionId(
+  stripeCustomerId: string,
+  stripeSubscriptionId: string,
+  status: Subscription['status'] = 'active',
+  currentPeriodEnd?: Date
+): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE subscriptions 
+    SET stripe_subscription_id = ?,
+        status = ?,
+        current_period_end = ?,
+        updated_at = CURRENT_TIMESTAMP 
+    WHERE stripe_customer_id = ?
+  `).run(
+    stripeSubscriptionId,
+    status,
+    currentPeriodEnd?.toISOString() || null,
+    stripeCustomerId
+  );
+  
+  // Also update workspace tier
+  const sub = db.prepare(
+    'SELECT workspace_id FROM subscriptions WHERE stripe_customer_id = ?'
+  ).get(stripeCustomerId) as { workspace_id: number } | undefined;
+  
+  if (sub && (status === 'active' || status === 'trialing')) {
+    db.prepare('UPDATE workspaces SET tier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run('premium', sub.workspace_id);
+  }
+}
+
+export function getSubscriptionByWorkspace(workspaceId: number): Subscription | null {
+  const db = getDb();
+  return db.prepare('SELECT * FROM subscriptions WHERE workspace_id = ?').get(workspaceId) as Subscription | undefined || null;
+}
+
+export function getSubscriptionByCustomerId(stripeCustomerId: string): Subscription | null {
+  const db = getDb();
+  return db.prepare('SELECT * FROM subscriptions WHERE stripe_customer_id = ?').get(stripeCustomerId) as Subscription | undefined || null;
+}
+
+export function getSubscriptionBySubId(stripeSubscriptionId: string): Subscription | null {
+  const db = getDb();
+  return db.prepare('SELECT * FROM subscriptions WHERE stripe_subscription_id = ?').get(stripeSubscriptionId) as Subscription | undefined || null;
+}
+
+export function cancelSubscription(stripeSubscriptionId: string): void {
+  const db = getDb();
+  
+  // Get the subscription first
+  const sub = db.prepare(
+    'SELECT workspace_id FROM subscriptions WHERE stripe_subscription_id = ?'
+  ).get(stripeSubscriptionId) as { workspace_id: number } | undefined;
+  
+  db.prepare(`
+    UPDATE subscriptions 
+    SET status = 'canceled', updated_at = CURRENT_TIMESTAMP 
+    WHERE stripe_subscription_id = ?
+  `).run(stripeSubscriptionId);
+  
+  // Downgrade workspace tier
+  if (sub) {
+    db.prepare('UPDATE workspaces SET tier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run('free', sub.workspace_id);
+  }
+}
+
+export function isPremiumWorkspace(workspaceId: number): boolean {
+  const db = getDb();
+  const sub = db.prepare(`
+    SELECT status FROM subscriptions 
+    WHERE workspace_id = ? AND status IN ('active', 'trialing')
+  `).get(workspaceId) as { status: string } | undefined;
+  
+  return !!sub;
+}
+
+export function isPremiumByPortalId(portalId: string): boolean {
+  const db = getDb();
+  const result = db.prepare(`
+    SELECT s.status FROM subscriptions s
+    JOIN workspaces w ON s.workspace_id = w.id
+    WHERE w.portal_id = ? AND s.status IN ('active', 'trialing')
+  `).get(portalId) as { status: string } | undefined;
+  
+  return !!result;
 }
 
 // Export getter for advanced queries (only at runtime)

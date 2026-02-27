@@ -54,6 +54,9 @@ function FloatingOrbs() {
 export default function LandingPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'free' | 'premium'>('premium');
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [upgradeEmail, setUpgradeEmail] = useState('');
+  const [isUpgrading, setIsUpgrading] = useState(false);
 
   const handleConnect = async () => {
     const token = prompt('Enter your HubSpot Private App Access Token (pat-na1-...)');
@@ -67,6 +70,9 @@ export default function LandingPage() {
         const data = await res.json();
         sessionStorage.setItem('auditResults', JSON.stringify(data));
         sessionStorage.setItem('hubspotToken', token);
+        // Generate a portal ID from the token for tracking
+        const portalId = 'portal-' + token.substring(0, 8);
+        sessionStorage.setItem('portalId', portalId);
         window.location.href = '/results';
       } else {
         alert('Invalid token or access denied');
@@ -76,6 +82,50 @@ export default function LandingPage() {
       alert('Error: ' + error);
       setIsLoading(false);
     }
+  };
+
+  const handlePremiumSignup = async () => {
+    if (!upgradeEmail) {
+      alert('Please enter your email');
+      return;
+    }
+    
+    setIsUpgrading(true);
+    try {
+      // First, prompt for HubSpot token
+      const token = prompt('To start your Premium trial, please enter your HubSpot Private App Access Token (pat-na1-...)');
+      if (!token) {
+        setIsUpgrading(false);
+        return;
+      }
+      
+      const portalId = 'portal-' + token.substring(0, 8);
+      
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: upgradeEmail,
+          portalId: portalId,
+        }),
+      });
+      
+      const data = await res.json();
+      
+      if (data.url) {
+        // Store token for after checkout
+        sessionStorage.setItem('hubspotToken', token);
+        sessionStorage.setItem('portalId', portalId);
+        // Redirect to Stripe Checkout
+        window.location.href = data.url;
+      } else {
+        alert('Failed to start checkout: ' + (data.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Checkout error:', error);
+      alert('Failed to start checkout. Please try again.');
+    }
+    setIsUpgrading(false);
   };
 
   return (
@@ -99,6 +149,7 @@ export default function LandingPage() {
             <a href="#features" className="text-slate-600 hover:text-slate-900 transition-colors">Features</a>
             <a href="#pricing" className="text-slate-600 hover:text-slate-900 transition-colors">Pricing</a>
             <a href="#testimonials" className="text-slate-600 hover:text-slate-900 transition-colors">Testimonials</a>
+            <a href="#faq" className="text-slate-600 hover:text-slate-900 transition-colors">FAQ</a>
           </div>
           <button
             onClick={handleConnect}
@@ -510,11 +561,32 @@ export default function LandingPage() {
                   </li>
                 ))}
               </ul>
-              <button className="w-full py-3 px-6 bg-white text-blue-600 font-semibold rounded-xl hover:bg-blue-50 transition-colors">
-                Start 14-Day Free Trial
+              <input
+                type="email"
+                value={upgradeEmail}
+                onChange={(e) => setUpgradeEmail(e.target.value)}
+                placeholder="Enter your email"
+                className="w-full px-4 py-3 mb-3 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-white/50"
+              />
+              <button 
+                onClick={handlePremiumSignup}
+                disabled={isUpgrading || !upgradeEmail}
+                className="w-full py-3 px-6 bg-white text-blue-600 font-semibold rounded-xl hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isUpgrading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Processing...
+                  </>
+                ) : (
+                  'Start 14-Day Free Trial'
+                )}
               </button>
               <p className="text-center text-blue-100 text-sm mt-4">
-                No credit card required
+                Secure payment via Stripe • Cancel anytime
               </p>
             </div>
           </div>
@@ -575,6 +647,58 @@ export default function LandingPage() {
                     <div className="text-sm text-slate-500">{testimonial.role}, {testimonial.company}</div>
                   </div>
                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* FAQ Section */}
+      <section id="faq" className="py-20 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center mb-16">
+            <h3 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-4">
+              Frequently Asked Questions
+            </h3>
+            <p className="text-xl text-slate-600">
+              Everything you need to know about HubSpot Health
+            </p>
+          </div>
+
+          <div className="space-y-6">
+            {[
+              {
+                q: "How does the free audit work?",
+                a: "Simply enter your HubSpot Private App Access Token, and we'll analyze your contacts, deals, and companies in about 60 seconds. You'll get a complete health score with category breakdowns and issue identification — no payment required."
+              },
+              {
+                q: "What's a HubSpot Private App Access Token?",
+                a: "It's a secure way to connect third-party tools to your HubSpot. You can create one in HubSpot Settings → Integrations → Private Apps. We only need read access for the free audit, and read/write for the Premium auto-fix features."
+              },
+              {
+                q: "Is my data secure?",
+                a: "Absolutely. We never store your HubSpot data. Our audit runs in real-time, analyzes your data, and then forgets it. Your Private App Token is stored only in your browser session and never on our servers."
+              },
+              {
+                q: "What issues can Premium auto-fix?",
+                a: "Premium can automatically fix: duplicate contacts and companies (by merging), inconsistent name formatting (title case), phone number standardization (E.164 format), orphan contacts (archiving), and stale deals (archiving 60+ day inactive deals)."
+              },
+              {
+                q: "Can I cancel anytime?",
+                a: "Yes! You can cancel your Premium subscription at any time from your dashboard. You'll continue to have access until the end of your billing period, and you can always use the free audit features."
+              },
+              {
+                q: "Do you offer refunds?",
+                a: "We offer a 14-day free trial so you can test Premium risk-free. If you're not satisfied within your first billing period after the trial, contact us and we'll work something out."
+              },
+              {
+                q: "How often should I run an audit?",
+                a: "For best results, we recommend running a free audit monthly to catch data quality issues early. Premium subscribers get daily automated monitoring with alerts, so you never have to remember to check."
+              },
+            ].map((faq, idx) => (
+              <div key={idx} className="bg-white rounded-xl border border-slate-200 p-6 hover:shadow-md transition-shadow">
+                <h4 className="text-lg font-semibold text-slate-900 mb-3">{faq.q}</h4>
+                <p className="text-slate-600 leading-relaxed">{faq.a}</p>
               </div>
             ))}
           </div>
